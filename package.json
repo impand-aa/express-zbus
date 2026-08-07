@@ -1,16 +1,38 @@
 {
-  "name": "express-hello-world",
-  "version": "1.0.0",
-  "description": "Express Hello World on Render",
-  "main": "app.js",
-  "repository": "https://github.com/render-examples/express-hello-world",
-  "author": "Render Developers",
-  "license": "MIT",
-  "private": false,
+  "name": "shiftmaker-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
-    "start": "node app.js"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
   "dependencies": {
+    "@popperjs/core": "^2.11.8",
+    "bootstrap": "^5.3.8",
+    "luaparse": "^0.3.1",
+    "react": "^19.2.6",
+    "react-bootstrap": "^2.10.10",
+    "react-dom": "^19.2.6",
     "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/luaparse": "^0.2.13",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.7"
   }
 }
