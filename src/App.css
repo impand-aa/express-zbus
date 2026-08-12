@@ -3,6 +3,17 @@
   color: #e7edf8;
 }
 
+.sync-error-toast {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1080;
+  max-width: 32rem;
+  width: calc(100% - 2rem);
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.4);
+}
+
 .workspace-container {
   position: relative;
 }
@@ -22,11 +33,22 @@
   align-items: center;
 }
 
-.workspace-toolbar__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+.workspace-user-menu {
+  margin-left: auto;
+}
+
+.workspace-user-menu .dropdown-menu {
+  margin-top: 0;
+}
+
+/* Bridges the pixel gap between the toggle and menu so hovering across it doesn't close the menu. */
+.workspace-user-menu .dropdown-menu::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 0;
+  right: 0;
+  height: 12px;
 }
 
 .integrity-warning-list {
@@ -1545,10 +1567,6 @@
 @media (max-width: 767px) {
   .workspace-toolbar {
     align-items: stretch;
-  }
-
-  .workspace-toolbar__actions {
-    width: 100%;
   }
 
   .workspace-tabs .btn {

@@ -18,6 +18,7 @@ interface JourneyOrderItemProps {
   isDragSource?: boolean
   isDropTargetAfter?: boolean
   isDropTargetBefore?: boolean
+  isStopUnmatched?: boolean
   muted?: boolean
   panelDestination?: string
   platformUsageHints?: string[]
@@ -65,6 +66,7 @@ export function JourneyOrderItem({
   isDragSource = false,
   isDropTargetAfter = false,
   isDropTargetBefore = false,
+  isStopUnmatched = false,
   muted = false,
   panelDestination = '',
   platformUsageHints = [],
@@ -257,9 +259,10 @@ export function JourneyOrderItem({
           <>
             <Form.Control
               size="sm"
-              className="order-row__field order-row__field--wide"
+              className={`order-row__field order-row__field--wide${isStopUnmatched ? ' order-row__field--warning' : ''}`}
               disabled={readOnly}
               placeholder="Stop name"
+              title={isStopUnmatched ? 'This stop is not mentioned in any imported route.' : undefined}
               value={row.args[0]?.value ?? ''}
               onChange={(event) => updateArgument(0, 'string', event.target.value)}
             />

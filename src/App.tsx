@@ -1,9 +1,10 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { Alert, Badge, Button, ButtonGroup, Container, Stack } from 'react-bootstrap'
+import { Alert, Badge, Button, ButtonGroup, Container, Dropdown, Stack } from 'react-bootstrap'
 
 import './App.css'
 
 import { ImportExportTab } from './components/ImportExportTab'
+import { ConfirmModal } from './components/ConfirmModal'
 import { IntegrityConfigModal } from './components/IntegrityConfigModal'
 import { LiveDisplayUpdateModal } from './components/LiveDisplayUpdateModal'
 import { LiveRouteUpdateModal } from './components/LiveRouteUpdateModal'
@@ -11,9 +12,13 @@ import { JourneyEditorPanel } from './components/JourneyEditorPanel'
 import { LiveShiftUpdateModal } from './components/LiveShiftUpdateModal'
 import { ModuleSourcesTab } from './components/ModuleSourcesTab'
 import { OperationsOverviewTab } from './components/OperationsOverviewTab'
+import { PublishesTab } from './components/PublishesTab'
 import { ShiftOrdersPanel } from './components/ShiftOrdersPanel'
 import { TemporaryDisplaysTab } from './components/TemporaryDisplaysTab'
 import { TemporaryRoutesTab } from './components/TemporaryRoutesTab'
+import { SavedShiftsModal } from './components/SavedShiftsModal'
+import { UserMenu } from './components/UserMenu'
+import { useAuth } from './components/AuthGate'
 import {
   buildUniqueJourneyKey,
   cloneShiftOrder,
@@ -29,8 +34,18 @@ import {
 import { buildIntegrityWarnings, createDefaultIntegrityConfig, getIntegrityConfigIssue } from './lib/integrity'
 import { generateShiftModuleSource, parseShiftModuleSource } from './lib/luauShift'
 import { loadPersistedReferenceModuleState, savePersistedReferenceModuleSources } from './lib/referenceModuleStorage'
+import { fetchReferenceModules, saveReferenceModule } from './lib/referenceModuleApi'
 import { parsePanelsModuleSource, parseRoutesModuleSource, parseSoundsModuleSource } from './lib/referenceModules'
-import { loadPersistedSavedShiftState, savePersistedSavedShiftSources, upsertSavedShiftSource } from './lib/savedShiftStorage'
+import { fetchAllShifts, saveShift, upsertShiftRecord } from './lib/shiftApi'
+import {
+  createPublishRequest,
+  deletePublishRequest,
+  fetchPublishRequests,
+  setPublishRequestStatus,
+  type PublishRequestRecord,
+  type PublishRequestStatus,
+  type PublishRequestType,
+} from './lib/publishRequestApi'
 import type { AppendedSubstituteServicePlan } from './lib/substituteServicePlanner'
 import {
   cloneTemporaryNumEntry,
@@ -54,14 +69,14 @@ import type {
   ShiftOrder,
   ShiftPlanNode,
 } from './types'
-import type { LoadedSavedShiftState } from './lib/savedShiftStorage'
+import type { ShiftRecord } from './lib/shiftApi'
 
 type Notice = {
   variant: 'success' | 'danger' | 'info' | 'warning'
   text: string
 }
 
-type WorkspaceTab = 'build' | 'overview' | 'io' | 'modules' | 'displays' | 'routes'
+type WorkspaceTab = 'build' | 'overview' | 'io' | 'modules' | 'displays' | 'routes' | 'publishes'
 
 function getExportState(document: ShiftDocument) {
   try {
@@ -79,21 +94,15 @@ function getExportState(document: ShiftDocument) {
 
 function getInitialNotice(
   initialReferenceModulesState: ReturnType<typeof loadPersistedReferenceModuleState>,
-  initialSavedShiftState: LoadedSavedShiftState,
 ): Notice {
-  const storageWarnings = [
-    initialReferenceModulesState.storageWarning,
-    initialSavedShiftState.storageWarning,
-  ].filter(Boolean)
-
-  if (storageWarnings.length > 0) {
+  if (initialReferenceModulesState.storageWarning) {
     return {
-      text: storageWarnings.join(' '),
+      text: initialReferenceModulesState.storageWarning,
       variant: 'warning',
     }
   }
 
-  if (!initialReferenceModulesState.restoredFromStorage && !initialSavedShiftState.restoredFromStorage) {
+  if (!initialReferenceModulesState.restoredFromStorage) {
     return {
       text: 'Ready.',
       variant: 'info',
@@ -101,9 +110,6 @@ function getInitialNotice(
   }
 
   const restoredStates = [
-    initialSavedShiftState.savedShifts.length > 0
-      ? `${initialSavedShiftState.savedShifts.length} saved shift${initialSavedShiftState.savedShifts.length === 1 ? '' : 's'}`
-      : '',
     initialReferenceModulesState.routesSource.trim()
       ? initialReferenceModulesState.routesError
         ? 'saved routes source needs reimport review'
@@ -126,6 +132,13 @@ function getInitialNotice(
       : '',
   ].filter(Boolean)
 
+  if (restoredStates.length === 0) {
+    return {
+      text: 'Ready.',
+      variant: 'info',
+    }
+  }
+
   return {
     text: `Restored ${restoredStates.join(' and ')} from local storage.`,
     variant: initialReferenceModulesState.routesError || initialReferenceModulesState.panelsError || initialReferenceModulesState.soundsError ? 'warning' : 'info',
@@ -133,8 +146,8 @@ function getInitialNotice(
 }
 
 function App() {
+  const { token, rank, username } = useAuth()
   const [initialReferenceModulesState] = useState(loadPersistedReferenceModuleState)
-  const [initialSavedShiftState] = useState(loadPersistedSavedShiftState)
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('build')
   const [document, setDocument] = useState<ShiftDocument>(() => createEmptyDocument())
   const [selectedJourneyId, setSelectedJourneyId] = useState<string | null>(null)
@@ -146,8 +159,19 @@ function App() {
   const [panelsSource, setPanelsSource] = useState(initialReferenceModulesState.panelsSource)
   const [numsSource, setNumsSource] = useState(initialReferenceModulesState.numsSource)
   const [soundsSource, setSoundsSource] = useState(initialReferenceModulesState.soundsSource)
-  const [savedShifts, setSavedShifts] = useState(initialSavedShiftState.savedShifts)
-  const [selectedSavedShiftModuleName, setSelectedSavedShiftModuleName] = useState(initialSavedShiftState.savedShifts[0]?.moduleName ?? '')
+  const [savedShifts, setSavedShifts] = useState<ShiftRecord[]>([])
+  const [showSavedShiftsModal, setShowSavedShiftsModal] = useState(false)
+  const [savedShiftsModalMode, setSavedShiftsModalMode] = useState<'save' | 'browse'>('browse')
+  const [savingShiftModuleName, setSavingShiftModuleName] = useState<string | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title?: string
+    message: string
+    confirmLabel?: string
+    resolve: (result: boolean) => void
+  } | null>(null)
+  const [publishRequests, setPublishRequests] = useState<PublishRequestRecord[]>([])
+  const [creatingPublishRequest, setCreatingPublishRequest] = useState(false)
+  const [updatingPublishRequestId, setUpdatingPublishRequestId] = useState<string | null>(null)
   const [importedRoutes, setImportedRoutes] = useState<ImportedRouteDefinition[]>(initialReferenceModulesState.importedRoutes)
   const [importedPanels, setImportedPanels] = useState<ImportedPanelDefinition[]>(initialReferenceModulesState.importedPanels)
   const [importedPanelTemplates, setImportedPanelTemplates] = useState<TemporaryPanelEntry[]>(() => {
@@ -202,7 +226,9 @@ function App() {
   const [panelsImportError, setPanelsImportError] = useState(initialReferenceModulesState.panelsError)
   const [numsImportError, setNumsImportError] = useState(initialReferenceModulesState.numsError)
   const [soundsImportError, setSoundsImportError] = useState(initialReferenceModulesState.soundsError)
-  const [notice, setNotice] = useState<Notice>(() => getInitialNotice(initialReferenceModulesState, initialSavedShiftState))
+  const [notice, setNotice] = useState<Notice>(() => getInitialNotice(initialReferenceModulesState))
+  const [referenceModuleSyncError, setReferenceModuleSyncError] = useState('')
+  const [savingModuleType, setSavingModuleType] = useState<'routes' | 'panels' | 'nums' | 'sounds' | null>(null)
 
   const deferredDocument = useDeferredValue(document)
   const validation = validateDocument(document)
@@ -264,6 +290,13 @@ function App() {
   }, [document.shiftOrders, selectedShiftOrderId])
 
   useEffect(() => {
+    syncReferenceModulesFromServer()
+    syncShiftsFromServer()
+    syncPublishRequestsFromServer()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per session on sign-in
+  }, [token])
+
+  useEffect(() => {
     savePersistedReferenceModuleSources({
       routesSource,
       panelsSource,
@@ -271,16 +304,6 @@ function App() {
       soundsSource,
     })
   }, [numsSource, panelsSource, routesSource, soundsSource])
-
-  useEffect(() => {
-    savePersistedSavedShiftSources(savedShifts)
-  }, [savedShifts])
-
-  useEffect(() => {
-    if (!savedShifts.find((savedShift) => savedShift.moduleName === selectedSavedShiftModuleName)) {
-      setSelectedSavedShiftModuleName(savedShifts[0]?.moduleName ?? '')
-    }
-  }, [savedShifts, selectedSavedShiftModuleName])
 
   function setDefaultDownloadName(moduleName: string) {
     setDownloadName((currentDownloadName) => (
@@ -303,22 +326,49 @@ function App() {
     return normalizedModuleName
   }
 
-  function saveShiftSourceToMemory(moduleName: string, source: string) {
-    const normalizedModuleName = moduleName.trim()
-    const wasExisting = savedShifts.some((savedShift) => savedShift.moduleName === normalizedModuleName)
-    const nextSavedShifts = upsertSavedShiftSource(savedShifts, {
-      moduleName: normalizedModuleName,
-      source,
+  function requestConfirmation(message: string, options?: { title?: string; confirmLabel?: string }): Promise<boolean> {
+    return new Promise((resolve) => {
+      setConfirmDialog({
+        message,
+        title: options?.title,
+        confirmLabel: options?.confirmLabel,
+        resolve,
+      })
     })
-
-    setSavedShifts(nextSavedShifts)
-    setSelectedSavedShiftModuleName(normalizedModuleName)
-    setShiftModuleName(normalizedModuleName)
-
-    return wasExisting
   }
 
-  function saveCurrentExportToMemory(actionDescription: string) {
+  function resolveConfirmDialog(result: boolean) {
+    confirmDialog?.resolve(result)
+    setConfirmDialog(null)
+  }
+
+  async function saveShiftToServer(moduleName: string, source: string) {
+    const normalizedModuleName = moduleName.trim()
+    const wasExisting = savedShifts.some((savedShift) => savedShift.moduleName === normalizedModuleName)
+
+    setSavingShiftModuleName(normalizedModuleName)
+    try {
+      const record = await saveShift(token, normalizedModuleName, source)
+      setSavedShifts((currentSavedShifts) => upsertShiftRecord(currentSavedShifts, record))
+      setShiftModuleName(normalizedModuleName)
+      setDefaultDownloadName(normalizedModuleName)
+
+      return {
+        moduleName: normalizedModuleName,
+        wasExisting,
+      }
+    } catch (error) {
+      setNotice({
+        text: error instanceof Error ? error.message : `Failed to save shift ${normalizedModuleName} to the server.`,
+        variant: 'danger',
+      })
+      return null
+    } finally {
+      setSavingShiftModuleName(null)
+    }
+  }
+
+  async function saveCurrentExportToServer(actionDescription: string) {
     if (liveExport.error) {
       setNotice({
         text: liveExport.error,
@@ -332,12 +382,97 @@ function App() {
       return null
     }
 
-    const wasExisting = saveShiftSourceToMemory(moduleName, liveExport.source)
-    setDefaultDownloadName(moduleName)
+    return saveShiftToServer(moduleName, liveExport.source)
+  }
 
-    return {
-      moduleName,
-      wasExisting,
+  async function syncShiftsFromServer() {
+    try {
+      const shifts = await fetchAllShifts(token)
+      setSavedShifts(shifts)
+    } catch (error) {
+      setNotice({
+        text: error instanceof Error ? error.message : 'Failed to load saved shifts from the server.',
+        variant: 'danger',
+      })
+    }
+  }
+
+  async function syncPublishRequestsFromServer() {
+    try {
+      const requests = await fetchPublishRequests(token)
+      setPublishRequests(requests)
+    } catch (error) {
+      setNotice({
+        text: error instanceof Error ? error.message : 'Failed to load publish requests from the server.',
+        variant: 'danger',
+      })
+    }
+  }
+
+  async function createPublishRequestOnServer(request: { type: PublishRequestType; objectId: string | null; description: string; data: string }) {
+    if ((request.type === 'shift' && !request.objectId?.trim()) || !request.description.trim() || !request.data.trim()) {
+      setNotice({
+        text: 'Enter a description and paste the Luau source before requesting a publish (and an object ID for shifts).',
+        variant: 'warning',
+      })
+      return
+    }
+
+    setCreatingPublishRequest(true)
+    try {
+      const created = await createPublishRequest(token, request)
+      setPublishRequests((currentRequests) => [created, ...currentRequests])
+      setNotice({
+        text: `Requested a publish for ${request.type}${request.objectId ? ` ${request.objectId}` : ''}.`,
+        variant: 'success',
+      })
+    } catch (error) {
+      setNotice({
+        text: error instanceof Error ? error.message : 'Failed to request the publish.',
+        variant: 'danger',
+      })
+    } finally {
+      setCreatingPublishRequest(false)
+    }
+  }
+
+  async function updatePublishRequestStatus(id: string, status: PublishRequestStatus) {
+    setUpdatingPublishRequestId(id)
+    try {
+      const updated = await setPublishRequestStatus(token, id, status)
+      setPublishRequests((currentRequests) => currentRequests.map((request) => (
+        request.id === id ? updated : request
+      )))
+    } catch (error) {
+      setNotice({
+        text: error instanceof Error ? error.message : 'Failed to update the publish request status.',
+        variant: 'danger',
+      })
+    } finally {
+      setUpdatingPublishRequestId(null)
+    }
+  }
+
+  async function deletePublishRequestFromServer(id: string) {
+    const shouldDelete = await requestConfirmation('Delete this publish request? This cannot be undone.', {
+      title: 'Delete publish request?',
+      confirmLabel: 'Delete',
+    })
+    if (!shouldDelete) {
+      return
+    }
+
+    setUpdatingPublishRequestId(id)
+    try {
+      await deletePublishRequest(token, id)
+      setPublishRequests((currentRequests) => currentRequests.filter((request) => request.id !== id))
+    } catch (error) {
+      setNotice({
+        text: error instanceof Error ? error.message : 'Failed to delete the publish request.',
+        variant: 'danger',
+      })
+    } finally {
+      setUpdatingPublishRequestId(null)
     }
   }
 
@@ -538,28 +673,28 @@ function App() {
   }
 
   async function copyExport() {
-    const memorySaveResult = saveCurrentExportToMemory('exporting this shift')
-    if (!memorySaveResult) {
+    const saveResult = await saveCurrentExportToServer('exporting this shift')
+    if (!saveResult) {
       return
     }
 
     try {
       await navigator.clipboard.writeText(liveExport.source)
       setNotice({
-        text: `Luau source copied to the clipboard and ${memorySaveResult.wasExisting ? 'updated' : 'saved'} as shift ${memorySaveResult.moduleName}.`,
+        text: `Luau source copied to the clipboard and ${saveResult.wasExisting ? 'updated' : 'saved'} as shift ${saveResult.moduleName}.`,
         variant: 'success',
       })
     } catch {
       setNotice({
-        text: `Clipboard access failed. The export is still available in the text area and was ${memorySaveResult.wasExisting ? 'updated' : 'saved'} as shift ${memorySaveResult.moduleName}.`,
+        text: `Clipboard access failed. The export is still available in the text area and was ${saveResult.wasExisting ? 'updated' : 'saved'} as shift ${saveResult.moduleName}.`,
         variant: 'warning',
       })
     }
   }
 
-  function downloadExport() {
-    const memorySaveResult = saveCurrentExportToMemory('exporting this shift')
-    if (!memorySaveResult) {
+  async function downloadExport() {
+    const saveResult = await saveCurrentExportToServer('exporting this shift')
+    if (!saveResult) {
       return
     }
 
@@ -574,24 +709,12 @@ function App() {
     URL.revokeObjectURL(url)
 
     setNotice({
-      text: `Downloaded ${safeFileName} and ${memorySaveResult.wasExisting ? 'updated' : 'saved'} shift ${memorySaveResult.moduleName} in memory.`,
+      text: `Downloaded ${safeFileName} and ${saveResult.wasExisting ? 'updated' : 'saved'} shift ${saveResult.moduleName} on the server.`,
       variant: 'success',
     })
   }
 
-  function saveExportToMemory() {
-    const memorySaveResult = saveCurrentExportToMemory('saving this shift to memory')
-    if (!memorySaveResult) {
-      return
-    }
-
-    setNotice({
-      text: `${memorySaveResult.wasExisting ? 'Updated' : 'Saved'} shift ${memorySaveResult.moduleName} in local memory.`,
-      variant: 'success',
-    })
-  }
-
-  function importFromSource() {
+  async function importFromSource() {
     if (!importSource.trim()) {
       setNotice({
         text: 'Paste a shift module into the import panel first.',
@@ -608,19 +731,25 @@ function App() {
 
       const parsedDocument = parseShiftModuleSource(importSource)
       const normalizedSource = generateShiftModuleSource(parsedDocument)
-      const wasExisting = savedShifts.some((savedShift) => savedShift.moduleName === moduleName)
+      const shouldSaveToServer = await requestConfirmation(
+        `Save the imported shift to the server as module ${moduleName}? This will overwrite any existing shift saved under that name.`,
+        { title: 'Save imported shift?', confirmLabel: 'Save to server' },
+      )
+      const saveResult = shouldSaveToServer ? await saveShiftToServer(moduleName, normalizedSource) : null
 
       startTransition(() => {
         setDocument(parsedDocument)
         setSelectedJourneyId(parsedDocument.journeys[0]?.id ?? null)
         setSelectedShiftOrderId(parsedDocument.shiftOrders[0]?.id ?? null)
         setImportSource(normalizedSource)
-        saveShiftSourceToMemory(moduleName, normalizedSource)
-        setDefaultDownloadName(moduleName)
         setActiveTab('build')
         setNotice({
-          text: `Imported ${parsedDocument.journeys.length} journeys and ${parsedDocument.shiftOrders.length} shift orders from Luau and ${wasExisting ? 'updated' : 'saved'} shift ${moduleName} in memory.`,
-          variant: 'success',
+          text: !shouldSaveToServer
+            ? `Imported ${parsedDocument.journeys.length} journeys and ${parsedDocument.shiftOrders.length} shift orders from Luau without saving to the server.`
+            : saveResult
+              ? `Imported ${parsedDocument.journeys.length} journeys and ${parsedDocument.shiftOrders.length} shift orders from Luau and ${saveResult.wasExisting ? 'updated' : 'saved'} shift ${moduleName} on the server.`
+              : `Imported ${parsedDocument.journeys.length} journeys and ${parsedDocument.shiftOrders.length} shift orders from Luau, but the shift could not be saved to the server.`,
+          variant: !shouldSaveToServer ? 'info' : saveResult ? 'success' : 'warning',
         })
       })
     } catch (error) {
@@ -647,11 +776,11 @@ function App() {
     })
   }
 
-  function importSavedShiftFromMemory() {
-    const savedShift = savedShifts.find((currentSavedShift) => currentSavedShift.moduleName === selectedSavedShiftModuleName)
+  function loadShiftFromServer(moduleName: string) {
+    const savedShift = savedShifts.find((currentSavedShift) => currentSavedShift.moduleName === moduleName)
     if (!savedShift) {
       setNotice({
-        text: 'Select a saved shift from memory first.',
+        text: 'Select a saved shift first.',
         variant: 'warning',
       })
       return
@@ -668,8 +797,9 @@ function App() {
         setShiftModuleName(savedShift.moduleName)
         setDefaultDownloadName(savedShift.moduleName)
         setActiveTab('build')
+        setShowSavedShiftsModal(false)
         setNotice({
-          text: `Imported saved shift ${savedShift.moduleName} from memory.`,
+          text: `Loaded saved shift ${savedShift.moduleName} from the server.`,
           variant: 'success',
         })
       })
@@ -677,6 +807,43 @@ function App() {
       setNotice({
         text: error instanceof Error ? error.message : `Saved shift ${savedShift.moduleName} could not be imported.`,
         variant: 'danger',
+      })
+    }
+  }
+
+  async function saveShiftFromModal(moduleName: string) {
+    if (liveExport.error) {
+      setNotice({
+        text: liveExport.error,
+        variant: 'danger',
+      })
+      return
+    }
+
+    if (!moduleName.trim()) {
+      setNotice({
+        text: 'Enter a shift module name before saving.',
+        variant: 'warning',
+      })
+      return
+    }
+
+    const wasExisting = savedShifts.some((shift) => shift.moduleName === moduleName)
+    const shouldSave = await requestConfirmation(
+      wasExisting
+        ? `Overwrite the shift already saved on the server as module ${moduleName}?`
+        : `Save the current shift to the server as module ${moduleName}?`,
+      { title: 'Save shift?', confirmLabel: 'Save to server' },
+    )
+    if (!shouldSave) {
+      return
+    }
+
+    const saveResult = await saveShiftToServer(moduleName, liveExport.source)
+    if (saveResult) {
+      setNotice({
+        text: `${saveResult.wasExisting ? 'Updated' : 'Saved'} shift ${saveResult.moduleName} on the server.`,
+        variant: 'success',
       })
     }
   }
@@ -818,6 +985,103 @@ function App() {
     }
   }
 
+  function applyFetchedReferenceModuleSources(sources: {
+    routesSource: string
+    panelsSource: string
+    numsSource: string
+    soundsSource: string
+  }) {
+    setRoutesSource(sources.routesSource)
+    setPanelsSource(sources.panelsSource)
+    setNumsSource(sources.numsSource)
+    setSoundsSource(sources.soundsSource)
+
+    if (sources.routesSource.trim()) {
+      try {
+        setImportedRoutes(parseRoutesModuleSource(sources.routesSource))
+        setRoutesImportError('')
+      } catch (error) {
+        setRoutesImportError(error instanceof Error ? error.message : 'Failed to import the routes module.')
+      }
+    } else {
+      setImportedRoutes([])
+      setRoutesImportError('')
+    }
+
+    if (sources.panelsSource.trim()) {
+      try {
+        setImportedPanels(parsePanelsModuleSource(sources.panelsSource))
+        setImportedPanelTemplates(parseTemporaryPanelsModuleSource(sources.panelsSource))
+        setPanelsImportError('')
+      } catch (error) {
+        setPanelsImportError(error instanceof Error ? error.message : 'Failed to import the panels module.')
+      }
+    } else {
+      setImportedPanels([])
+      setImportedPanelTemplates([])
+      setPanelsImportError('')
+    }
+
+    if (sources.numsSource.trim()) {
+      try {
+        const numTemplates = parseTemporaryNumsModuleSource(sources.numsSource)
+        setImportedNumsCount(numTemplates.length)
+        setImportedNumTemplates(numTemplates)
+        setNumsImportError('')
+      } catch (error) {
+        setNumsImportError(error instanceof Error ? error.message : 'Failed to import the nums module.')
+      }
+    } else {
+      setImportedNumsCount(0)
+      setImportedNumTemplates([])
+      setNumsImportError('')
+    }
+
+    if (sources.soundsSource.trim()) {
+      try {
+        setImportedSounds(parseSoundsModuleSource(sources.soundsSource))
+        setSoundsImportError('')
+      } catch (error) {
+        setSoundsImportError(error instanceof Error ? error.message : 'Failed to import the sounds module.')
+      }
+    } else {
+      setImportedSounds([])
+      setSoundsImportError('')
+    }
+  }
+
+  async function syncReferenceModulesFromServer() {
+    try {
+      const sources = await fetchReferenceModules(token)
+      applyFetchedReferenceModuleSources(sources)
+      setReferenceModuleSyncError('')
+      setNotice({
+        text: 'Reference modules synchronised from server.',
+        variant: 'success',
+      })
+    } catch (error) {
+      setReferenceModuleSyncError(error instanceof Error ? error.message : 'Failed to synchronise reference modules.')
+    }
+  }
+
+  async function saveReferenceModuleToServer(type: 'routes' | 'panels' | 'nums' | 'sounds', source: string) {
+    setSavingModuleType(type)
+    try {
+      await saveReferenceModule(token, type, source)
+      setNotice({
+        text: `Saved ${type} module to server.`,
+        variant: 'success',
+      })
+    } catch (error) {
+      setNotice({
+        text: error instanceof Error ? error.message : `Failed to save the ${type} module to the server.`,
+        variant: 'danger',
+      })
+    } finally {
+      setSavingModuleType(null)
+    }
+  }
+
   function clearRoutesSource() {
     setRoutesSource('')
     setImportedRoutes([])
@@ -939,6 +1203,17 @@ function App() {
 
   return (
     <div className="app-shell" data-bs-theme="dark">
+      {referenceModuleSyncError ? (
+        <Alert
+          variant="danger"
+          dismissible
+          onClose={() => setReferenceModuleSyncError('')}
+          className="sync-error-toast"
+        >
+          {referenceModuleSyncError}
+        </Alert>
+      ) : null}
+
       <Container fluid="xxl" className="workspace-container py-3 py-xl-4">
         <div className="workspace-toolbar mb-3">
           <ButtonGroup size="sm" className="workspace-tabs">
@@ -960,7 +1235,22 @@ function App() {
             <Button variant={activeTab === 'routes' ? 'primary' : 'outline-secondary'} onClick={() => setActiveTab('routes')}>
               Temporary routes
             </Button>
+            <Button variant={activeTab === 'publishes' ? 'primary' : 'outline-secondary'} onClick={() => setActiveTab('publishes')}>
+              Publishes
+            </Button>
           </ButtonGroup>
+
+          <UserMenu>
+            <Dropdown.Item onClick={() => setShowIntegrityConfigModal(true)}>
+              Integrity{integrityWarnings.length > 0 ? ` (${integrityWarnings.length})` : ''}
+            </Dropdown.Item>
+            <Dropdown.Item onClick={resetToBlank}>
+              Reset blank
+            </Dropdown.Item>
+            <Dropdown.Item onClick={syncReferenceModulesFromServer}>
+              Synchronise reference modules
+            </Dropdown.Item>
+          </UserMenu>
 
           <div className="workspace-toolbar__stats">
             <Badge bg={exportReady ? 'success' : 'warning'} text={exportReady ? undefined : 'dark'} pill>
@@ -988,20 +1278,6 @@ function App() {
             ) : null}
             <Badge bg="secondary" pill>{savedShifts.length} saved shifts</Badge>
             <span className={`toolbar-note toolbar-note--${notice.variant}`}>{notice.text}</span>
-          </div>
-
-          <div className="workspace-toolbar__actions">
-            <Button
-              size="sm"
-              variant={integrityWarnings.length > 0 || integrityConfigIssue ? 'outline-warning' : 'outline-secondary'}
-              onClick={() => setShowIntegrityConfigModal(true)}
-            >
-              Integrity{integrityWarnings.length > 0 ? ` (${integrityWarnings.length})` : ''}
-            </Button>
-
-            <Button variant="outline-secondary" size="sm" onClick={resetToBlank}>
-              Reset blank
-            </Button>
           </div>
         </div>
 
@@ -1082,21 +1358,25 @@ function App() {
             importSource={importSource}
             moduleName={shiftModuleName}
             previewSource={previewExport.error ? '' : previewExport.source}
-            savedShiftModuleNames={savedShifts.map((savedShift) => savedShift.moduleName)}
-            selectedSavedShiftModuleName={selectedSavedShiftModuleName}
+            savedShiftsCount={savedShifts.length}
             validationErrors={validation.errors}
             onChangeDownloadName={setDownloadName}
             onChangeImportSource={setImportSource}
             onChangeModuleName={setShiftModuleName}
-            onChangeSelectedSavedShiftModuleName={setSelectedSavedShiftModuleName}
             onClearImportSource={() => setImportSource('')}
             onCopyExport={copyExport}
             onDownloadExport={downloadExport}
-            onImportSavedShift={importSavedShiftFromMemory}
             onImportSource={importFromSource}
             onLoadIntoImport={loadCurrentExportIntoImporter}
             onOpenLiveUpdate={() => setShowLiveShiftUpdateModal(true)}
-            onSaveExportToMemory={saveExportToMemory}
+            onOpenBrowseShifts={() => {
+              setSavedShiftsModalMode('browse')
+              setShowSavedShiftsModal(true)
+            }}
+            onOpenSaveShift={() => {
+              setSavedShiftsModalMode('save')
+              setShowSavedShiftsModal(true)
+            }}
           />
         ) : null}
 
@@ -1126,6 +1406,12 @@ function App() {
             onImportPanels={importPanelsSource}
             onImportRoutes={importRoutesSource}
             onImportSounds={importSoundsSource}
+            canSaveToServer={rank === 'admin'}
+            savingModuleType={savingModuleType}
+            onSaveNumsToServer={() => saveReferenceModuleToServer('nums', numsSource)}
+            onSavePanelsToServer={() => saveReferenceModuleToServer('panels', panelsSource)}
+            onSaveRoutesToServer={() => saveReferenceModuleToServer('routes', routesSource)}
+            onSaveSoundsToServer={() => saveReferenceModuleToServer('sounds', soundsSource)}
           />
         ) : null}
 
@@ -1157,6 +1443,19 @@ function App() {
           />
         ) : null}
 
+        {activeTab === 'publishes' ? (
+          <PublishesTab
+            creatingRequest={creatingPublishRequest}
+            currentUsername={username}
+            isAdmin={rank === 'admin'}
+            requests={publishRequests}
+            updatingRequestId={updatingPublishRequestId}
+            onCreateRequest={createPublishRequestOnServer}
+            onDeleteRequest={deletePublishRequestFromServer}
+            onSetStatus={updatePublishRequestStatus}
+          />
+        ) : null}
+
         <IntegrityConfigModal
           config={integrityConfig}
           show={showIntegrityConfigModal}
@@ -1166,6 +1465,27 @@ function App() {
             setIntegrityConfig(nextConfig)
             setShowIntegrityConfigModal(false)
           }}
+        />
+
+        <SavedShiftsModal
+          canSaveCurrent={!liveExport.error}
+          currentModuleName={shiftModuleName}
+          savingModuleName={savingShiftModuleName}
+          shifts={savedShifts}
+          mode={savedShiftsModalMode}
+          show={showSavedShiftsModal}
+          onClose={() => setShowSavedShiftsModal(false)}
+          onLoad={loadShiftFromServer}
+          onSave={saveShiftFromModal}
+        />
+
+        <ConfirmModal
+          confirmLabel={confirmDialog?.confirmLabel}
+          message={confirmDialog?.message ?? ''}
+          show={confirmDialog !== null}
+          title={confirmDialog?.title}
+          onCancel={() => resolveConfirmDialog(false)}
+          onConfirm={() => resolveConfirmDialog(true)}
         />
 
         <LiveShiftUpdateModal

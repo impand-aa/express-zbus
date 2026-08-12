@@ -101,6 +101,94 @@ export function JourneyEditorPanel({
     ]))
   }, [importedPanels, importedRoutes])
 
+  const stopNamesInImportedRoutes = useMemo(() => {
+    const stopNames = new Set<string>()
+
+    for (const route of importedRoutes) {
+      for (const row of route.orders) {
+        if (row.type !== 'stop') {
+          continue
+        }
+
+        const stopName = row.args[0]?.value?.trim().toLowerCase() ?? ''
+        if (stopName) {
+          stopNames.add(stopName)
+        }
+      }
+    }
+
+    return stopNames
+  }, [importedRoutes])
+
+  const stopOccurrenceCountsInShift = useMemo(() => {
+    const occurrenceCounts = new Map<string, number>()
+
+    for (const journey of journeys) {
+      for (const row of journey.orders) {
+        if (row.type !== 'stop') {
+          continue
+        }
+
+        const stopName = row.args[0]?.value?.trim().toLowerCase() ?? ''
+        if (stopName) {
+          occurrenceCounts.set(stopName, (occurrenceCounts.get(stopName) ?? 0) + 1)
+        }
+      }
+    }
+
+    return occurrenceCounts
+  }, [journeys])
+
+  function isStopUnmatched(row: { type: string, args: { value?: string }[] }) {
+    if (row.type !== 'stop') {
+      return false
+    }
+
+    const stopName = row.args[0]?.value?.trim().toLowerCase() ?? ''
+    if (!stopName) {
+      return false
+    }
+
+    if (stopNamesInImportedRoutes.has(stopName)) {
+      return false
+    }
+
+    return (stopOccurrenceCountsInShift.get(stopName) ?? 0) < 2
+  }
+
+  function flipJourneyOrders() {
+    if (!selectedJourney) {
+      return
+    }
+
+    onUpdateJourney(selectedJourney.id, (currentJourney) => {
+      if (currentJourney.orders.length <= 1) {
+        return currentJourney
+      }
+
+      const [firstRow, ...remainingRows] = currentJourney.orders
+      const reversedRemainingRows = [...remainingRows].reverse()
+
+      if (firstRow!.type !== 'panel') {
+        return {
+          ...currentJourney,
+          orders: [...currentJourney.orders].reverse(),
+        }
+      }
+
+      // the initial panel's destination no longer applies once the direction flips
+      const clearedFirstRow = {
+        ...firstRow!,
+        args: firstRow!.args.map((argument, index) => (index === 0 ? { ...argument, value: '' } : argument)),
+      }
+
+      return {
+        ...currentJourney,
+        orders: [clearedFirstRow, ...reversedRemainingRows],
+      }
+    })
+  }
+
   function moveJourneyOrderRow(rowIndex: number, targetIndex: number) {
     if (!selectedJourney) {
       return
@@ -309,6 +397,15 @@ export function JourneyEditorPanel({
                     >
                       Clone route orders
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline-secondary"
+                      disabled={selectedJourney.orders.length <= 1}
+                      title="Reverses the order list, keeping the first row in place and clearing its panel id if it's a panel."
+                      onClick={flipJourneyOrders}
+                    >
+                      Flip order
+                    </Button>
                     <ButtonGroup size="sm">
                       <Button
                         variant="outline-secondary"
@@ -368,6 +465,7 @@ export function JourneyEditorPanel({
                         isDragSource={draggedOrderRowId === row.id}
                         isDropTargetAfter={dropTarget?.rowId === row.id && dropTarget.position === 'after'}
                         isDropTargetBefore={dropTarget?.rowId === row.id && dropTarget.position === 'before'}
+                        isStopUnmatched={isStopUnmatched(row)}
                         panelDestination={row.type === 'panel' ? getPanelDestination(importedPanels, row.args[0]?.value ?? '') : ''}
                         platformUsageHints={row.type === 'stop'
                           ? (platformUsageHintsByStopAndPlatform.get(getStopPlatformKey(row.args[0]?.value ?? '', row.args[1]?.value ?? '')) ?? [])
@@ -454,6 +552,7 @@ export function JourneyEditorPanel({
                       <JourneyOrderItem
                         key={row.id}
                         importedSounds={importedSounds}
+                        isStopUnmatched={isStopUnmatched(row)}
                         muted
                         panelDestination={row.type === 'panel' ? getPanelDestination(importedPanels, row.args[0]?.value ?? '') : ''}
                         readOnly

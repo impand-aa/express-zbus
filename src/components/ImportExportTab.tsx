@@ -7,21 +7,19 @@ interface ImportExportTabProps {
   importSource: string
   moduleName: string
   previewSource: string
-  savedShiftModuleNames: string[]
-  selectedSavedShiftModuleName: string
+  savedShiftsCount: number
   validationErrors: string[]
   onChangeDownloadName: (value: string) => void
   onChangeImportSource: (value: string) => void
   onChangeModuleName: (value: string) => void
-  onChangeSelectedSavedShiftModuleName: (value: string) => void
   onClearImportSource: () => void
   onCopyExport: () => void
   onDownloadExport: () => void
-  onImportSavedShift: () => void
   onImportSource: () => void
   onLoadIntoImport: () => void
+  onOpenBrowseShifts: () => void
   onOpenLiveUpdate: () => void
-  onSaveExportToMemory: () => void
+  onOpenSaveShift: () => void
 }
 
 export function ImportExportTab({
@@ -31,21 +29,19 @@ export function ImportExportTab({
   importSource,
   moduleName,
   previewSource,
-  savedShiftModuleNames,
-  selectedSavedShiftModuleName,
+  savedShiftsCount,
   validationErrors,
   onChangeDownloadName,
   onChangeImportSource,
   onChangeModuleName,
-  onChangeSelectedSavedShiftModuleName,
   onClearImportSource,
   onCopyExport,
   onDownloadExport,
-  onImportSavedShift,
   onImportSource,
   onLoadIntoImport,
+  onOpenBrowseShifts,
   onOpenLiveUpdate,
-  onSaveExportToMemory,
+  onOpenSaveShift,
 }: ImportExportTabProps) {
   return (
     <Card className="workspace-panel border-0 code-panel">
@@ -70,7 +66,7 @@ export function ImportExportTab({
             <Stack gap={2} className="compact-form">
               <div className="panel-toolbar panel-toolbar--dense">
                 <div className="panel-label">Shift memory</div>
-                <Badge bg="secondary" pill>{savedShiftModuleNames.length} saved</Badge>
+                <Badge bg="secondary" pill>{savedShiftsCount} saved on server</Badge>
               </div>
 
               <Form.Group>
@@ -82,7 +78,7 @@ export function ImportExportTab({
                   onChange={(event) => onChangeModuleName(event.target.value)}
                 />
                 <Form.Text className="text-secondary">
-                  Used to save or update the current shift in local memory when importing from source or exporting.
+                  Used to save or update the current shift on the server when importing from source or exporting.
                 </Form.Text>
               </Form.Group>
             </Stack>
@@ -91,28 +87,15 @@ export function ImportExportTab({
           <Col xl={6}>
             <Stack gap={2} className="compact-form">
               <div className="panel-toolbar panel-toolbar--dense">
-                <div className="panel-label">Import from memory</div>
-                <Button size="sm" disabled={savedShiftModuleNames.length === 0} variant="outline-secondary" onClick={onImportSavedShift}>
-                  Import saved shift
+                <div className="panel-label">Saved shifts</div>
+                <Button size="sm" variant="outline-secondary" onClick={onOpenBrowseShifts}>
+                  Browse saved shifts
                 </Button>
               </div>
 
-              <Form.Select
-                disabled={savedShiftModuleNames.length === 0}
-                size="sm"
-                value={selectedSavedShiftModuleName}
-                onChange={(event) => onChangeSelectedSavedShiftModuleName(event.target.value)}
-              >
-                {savedShiftModuleNames.length === 0 ? (
-                  <option value="">No saved shifts in memory</option>
-                ) : null}
-
-                {savedShiftModuleNames.map((savedShiftModuleName) => (
-                  <option key={savedShiftModuleName} value={savedShiftModuleName}>
-                    {savedShiftModuleName}
-                  </option>
-                ))}
-              </Form.Select>
+              <Form.Text className="text-secondary">
+                Browse every shift saved on the server, see who last updated it and when, then load or overwrite it.
+              </Form.Text>
             </Stack>
           </Col>
         </Row>
@@ -123,8 +106,8 @@ export function ImportExportTab({
               <div className="panel-toolbar panel-toolbar--dense">
                 <div className="panel-label">Export</div>
                 <ButtonGroup size="sm">
-                  <Button variant="success" onClick={onSaveExportToMemory}>
-                    Save to memory
+                  <Button variant="success" onClick={onOpenSaveShift}>
+                    Save
                   </Button>
                   <Button variant="primary" onClick={onCopyExport}>
                     Copy
@@ -182,7 +165,7 @@ export function ImportExportTab({
               />
 
               <Form.Text className="text-secondary">
-                Importing from source also saves or updates the shift in local memory under the module name above.
+                Importing from source also saves or updates the shift on the server under the module name above.
               </Form.Text>
             </Stack>
           </Col>

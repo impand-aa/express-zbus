@@ -25,6 +25,12 @@ interface ModuleSourcesTabProps {
   onImportPanels: () => void
   onImportRoutes: () => void
   onImportSounds: () => void
+  canSaveToServer?: boolean
+  savingModuleType?: 'routes' | 'panels' | 'nums' | 'sounds' | null
+  onSaveNumsToServer?: () => void
+  onSavePanelsToServer?: () => void
+  onSaveRoutesToServer?: () => void
+  onSaveSoundsToServer?: () => void
 }
 
 export function ModuleSourcesTab({
@@ -52,6 +58,12 @@ export function ModuleSourcesTab({
   onImportPanels,
   onImportRoutes,
   onImportSounds,
+  canSaveToServer = false,
+  savingModuleType = null,
+  onSaveNumsToServer,
+  onSavePanelsToServer,
+  onSaveRoutesToServer,
+  onSaveSoundsToServer,
 }: ModuleSourcesTabProps) {
   return (
     <Card className="workspace-panel border-0 code-panel module-sources-tab">
@@ -94,6 +106,11 @@ export function ModuleSourcesTab({
                 <Button variant="outline-secondary" onClick={onClearRoutesSource}>
                   Clear
                 </Button>
+                {canSaveToServer ? (
+                  <Button variant="outline-danger" onClick={onSaveRoutesToServer} disabled={savingModuleType === 'routes'}>
+                    {savingModuleType === 'routes' ? 'Saving…' : 'Save to server'}
+                  </Button>
+                ) : null}
               </ButtonGroup>
             </Stack>
           </Col>
@@ -128,6 +145,11 @@ export function ModuleSourcesTab({
                 <Button variant="outline-secondary" onClick={onClearPanelsSource}>
                   Clear
                 </Button>
+                {canSaveToServer ? (
+                  <Button variant="outline-danger" onClick={onSavePanelsToServer} disabled={savingModuleType === 'panels'}>
+                    {savingModuleType === 'panels' ? 'Saving…' : 'Save to server'}
+                  </Button>
+                ) : null}
               </ButtonGroup>
             </Stack>
           </Col>
@@ -162,6 +184,11 @@ export function ModuleSourcesTab({
                 <Button variant="outline-secondary" onClick={onClearNumsSource}>
                   Clear
                 </Button>
+                {canSaveToServer ? (
+                  <Button variant="outline-danger" onClick={onSaveNumsToServer} disabled={savingModuleType === 'nums'}>
+                    {savingModuleType === 'nums' ? 'Saving…' : 'Save to server'}
+                  </Button>
+                ) : null}
               </ButtonGroup>
             </Stack>
           </Col>
@@ -196,6 +223,11 @@ export function ModuleSourcesTab({
                 <Button variant="outline-secondary" onClick={onClearSoundsSource}>
                   Clear
                 </Button>
+                {canSaveToServer ? (
+                  <Button variant="outline-danger" onClick={onSaveSoundsToServer} disabled={savingModuleType === 'sounds'}>
+                    {savingModuleType === 'sounds' ? 'Saving…' : 'Save to server'}
+                  </Button>
+                ) : null}
               </ButtonGroup>
             </Stack>
           </Col>
