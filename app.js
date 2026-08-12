@@ -11,6 +11,10 @@ const port = process.env.PORT || 3000
 
 const app = express()
 app.use(express.json())
+app.use('/api', (req, _res, next) => {
+  console.log(`${req.method} ${req.originalUrl}`)
+  next()
+})
 app.use('/api', apiRouter)
 app.use(express.static(distDir))
 // SPA fallback: let the client-side router handle unknown paths
