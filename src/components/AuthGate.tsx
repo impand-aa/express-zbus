@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Alert, Button, Card, Container, Form } from 'react-bootstrap'
 
-import { changePassword, fetchSession, login, logout as logoutRequest } from '../lib/authApi'
+import { changePassword, fetchSession, login, logout as logoutRequest, onSessionExpired } from '../lib/authApi'
 
 type Session = {
   token: string
@@ -40,6 +40,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSessionExpired, setIsSessionExpired] = useState(false)
 
   // Restore the session from a saved token so a page refresh doesn't require signing in again.
   useEffect(() => {
@@ -54,6 +55,41 @@ export function AuthGate({ children }: { children: ReactNode }) {
       .finally(() => setIsRestoringSession(false))
   }, [])
 
+  // The free hosting tier can spin the server down after inactivity, silently expiring the
+  // token; re-check on focus so users find out before losing work to a failed save.
+  useEffect(() => {
+    if (!session) {
+      return
+    }
+
+    let isChecking = false
+
+    function handleFocus() {
+      if (isChecking || !session) {
+        return
+      }
+      isChecking = true
+      fetchSession(session.token)
+        .then(() => setIsSessionExpired(false))
+        .catch(() => setIsSessionExpired(true))
+        .finally(() => {
+          isChecking = false
+        })
+    }
+
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [session])
+
+  // Also react immediately if any authenticated request (save shift, load shift, etc.) finds
+  // the token invalid, instead of waiting for the next focus event.
+  useEffect(() => {
+    if (!session) {
+      return
+    }
+    return onSessionExpired(() => setIsSessionExpired(true))
+  }, [session])
+
   async function handleLogin(event: FormEvent) {
     event.preventDefault()
     setError('')
@@ -62,6 +98,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       const result = await login(username, password)
       localStorage.setItem(TOKEN_STORAGE_KEY, result.token)
       setSession(result)
+      setIsSessionExpired(false)
       setPassword('')
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : 'Login failed.')
@@ -198,6 +235,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ token: session.token, username: session.username, rank: session.rank, logout: handleLogout }}>
+      {isSessionExpired ? (
+        <Alert variant="danger" className="mb-0 session-expired-banner">
+          Your session has expired (likely due to server inactivity). Your changes may no longer save —
+          copy any in-progress work, then sign in again when ready.
+        </Alert>
+      ) : null}
       {children}
     </AuthContext.Provider>
   )

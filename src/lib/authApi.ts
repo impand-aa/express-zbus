@@ -5,11 +5,28 @@ export type LoginResult = {
   mustChangePassword: boolean
 }
 
+// Messages returned by the server's requireAuth middleware, as opposed to unrelated 401s
+// (e.g. an incorrect current password on the change-password endpoint).
+const SESSION_INVALID_MESSAGES = new Set(['authentication required', 'invalid or expired session'])
+
+type SessionExpiredListener = () => void
+const sessionExpiredListeners = new Set<SessionExpiredListener>()
+
+// Lets AuthGate react immediately whenever any authenticated request finds the token invalid,
+// on top of the periodic focus-triggered check.
+export function onSessionExpired(listener: SessionExpiredListener): () => void {
+  sessionExpiredListeners.add(listener)
+  return () => sessionExpiredListeners.delete(listener)
+}
+
 export async function parseJsonResponse(response: Response) {
   const isJson = response.headers.get('content-type')?.includes('application/json') ?? false
   const data = isJson ? await response.json().catch(() => null) : null
   if (!response.ok || !isJson) {
     const message = data && typeof data.error === 'string' ? data.error : `Request failed with status ${response.status}`
+    if (response.status === 401 && SESSION_INVALID_MESSAGES.has(message)) {
+      sessionExpiredListeners.forEach((listener) => listener())
+    }
     throw new Error(message)
   }
   return data

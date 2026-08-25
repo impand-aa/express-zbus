@@ -37,11 +37,41 @@ export function ShiftOrdersPanel({
   const [showGenerateCopiesModal, setShowGenerateCopiesModal] = useState(false)
   const [showDutyPaperModal, setShowDutyPaperModal] = useState(false)
   const [showTimelineModal, setShowTimelineModal] = useState(false)
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ nodeId: string, position: 'before' | 'after' } | null>(null)
   const sortedShiftOrders = [...shiftOrders].sort((left, right) => left.orderNumber - right.orderNumber)
   const selectedShiftOrder = sortedShiftOrders.find((order) => order.id === selectedShiftOrderId) ?? sortedShiftOrders[0] ?? null
   const timingPreviews = selectedShiftOrder
     ? getShiftOrderTimingPreviews(selectedShiftOrder, journeys, importedRoutes)
     : []
+
+  function clearDragState() {
+    setDraggedNodeId(null)
+    setDropTarget(null)
+  }
+
+  function moveShiftPlanNode(orderId: string, nodeIndex: number, targetIndex: number) {
+    onUpdateShiftOrder(orderId, (currentOrder) => {
+      if (
+        nodeIndex < 0 ||
+        nodeIndex >= currentOrder.nodes.length ||
+        targetIndex < 0 ||
+        targetIndex >= currentOrder.nodes.length ||
+        nodeIndex === targetIndex
+      ) {
+        return currentOrder
+      }
+
+      const nextNodes = [...currentOrder.nodes]
+      const [movedNode] = nextNodes.splice(nodeIndex, 1)
+      nextNodes.splice(targetIndex, 0, movedNode!)
+
+      return {
+        ...currentOrder,
+        nodes: nextNodes,
+      }
+    })
+  }
 
   return (
     <Card className="workspace-panel border-0">
@@ -134,6 +164,9 @@ export function ShiftOrdersPanel({
                   {selectedShiftOrder.nodes.map((node, nodeIndex) => (
                     <ShiftPlanNodeItem
                       key={node.id}
+                      isDragSource={draggedNodeId === node.id}
+                      isDropTargetAfter={dropTarget?.nodeId === node.id && dropTarget.position === 'after'}
+                      isDropTargetBefore={dropTarget?.nodeId === node.id && dropTarget.position === 'before'}
                       journeyDurations={timingPreviews[nodeIndex]?.journeyDurations.map((journeyDuration) => (
                         journeyDuration.isDisplayable ? journeyDuration : null
                       ))}
@@ -146,6 +179,43 @@ export function ShiftOrdersPanel({
                           currentIndex === nodeIndex ? nextNode : currentNode
                         )),
                       }))}
+                      onDragEnd={clearDragState}
+                      onDragHover={(position) => {
+                        if (!draggedNodeId || draggedNodeId === node.id) {
+                          setDropTarget(null)
+                          return
+                        }
+
+                        setDropTarget({ nodeId: node.id, position })
+                      }}
+                      onDragStart={() => {
+                        setDraggedNodeId(node.id)
+                        setDropTarget(null)
+                      }}
+                      onDrop={(position) => {
+                        if (!draggedNodeId || draggedNodeId === node.id) {
+                          clearDragState()
+                          return
+                        }
+
+                        const sourceIndex = selectedShiftOrder.nodes.findIndex((currentNode) => currentNode.id === draggedNodeId)
+                        const hoveredIndex = selectedShiftOrder.nodes.findIndex((currentNode) => currentNode.id === node.id)
+                        if (sourceIndex < 0 || hoveredIndex < 0) {
+                          clearDragState()
+                          return
+                        }
+
+                        let targetIndex = hoveredIndex
+                        if (position === 'after') {
+                          targetIndex = hoveredIndex + 1
+                        }
+                        if (sourceIndex < targetIndex) {
+                          targetIndex -= 1
+                        }
+
+                        moveShiftPlanNode(selectedShiftOrder.id, sourceIndex, targetIndex)
+                        clearDragState()
+                      }}
                       onMove={(direction) => onUpdateShiftOrder(selectedShiftOrder.id, (currentOrder) => {
                         const targetIndex = nodeIndex + direction
                         if (targetIndex < 0 || targetIndex >= currentOrder.nodes.length) {

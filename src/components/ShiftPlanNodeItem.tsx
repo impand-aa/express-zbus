@@ -1,24 +1,39 @@
+import { type DragEvent as ReactDragEvent } from 'react'
 import { Button, ButtonGroup, Form, InputGroup, Stack } from 'react-bootstrap'
 
 import type { JourneyDurationInfo, JourneyNodeLoopSummary } from '../lib/shiftTiming'
 import type { JourneyDefinition, ShiftPlanNode } from '../types'
 
 interface ShiftPlanNodeItemProps {
+  isDragSource?: boolean
+  isDropTargetAfter?: boolean
+  isDropTargetBefore?: boolean
   journeyDurations?: Array<JourneyDurationInfo | null>
   journeys: JourneyDefinition[]
   loopSummary?: JourneyNodeLoopSummary | null
   node: ShiftPlanNode
   onChange: (nextNode: ShiftPlanNode) => void
+  onDragEnd?: () => void
+  onDragHover?: (position: 'before' | 'after') => void
+  onDragStart?: () => void
+  onDrop?: (position: 'before' | 'after') => void
   onMove: (direction: number) => void
   onRemove: () => void
 }
 
 export function ShiftPlanNodeItem({
+  isDragSource = false,
+  isDropTargetAfter = false,
+  isDropTargetBefore = false,
   journeyDurations = [],
   journeys,
   loopSummary = null,
   node,
   onChange,
+  onDragEnd,
+  onDragHover,
+  onDragStart,
+  onDrop,
   onMove,
   onRemove,
 }: ShiftPlanNodeItemProps) {
@@ -26,10 +41,63 @@ export function ShiftPlanNodeItem({
     return `${duration.travelMinutes}+${duration.pauseMinutes} (${duration.travelMinutes + duration.pauseMinutes}) min`
   }
 
+  function getDropPosition(event: ReactDragEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+  }
+
+  function handleDragStart(event: ReactDragEvent<HTMLButtonElement>) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', node.id)
+    onDragStart?.()
+  }
+
   return (
-    <div className="compact-card compact-form">
-      <div className="compact-card__header">
-        <div className="compact-card__tag">{node.kind === 'time' ? 'time' : 'journeys'}</div>
+    <div
+      className={`compact-card compact-form${isDragSource ? ' is-drag-source' : ''}${isDropTargetBefore ? ' is-drop-target-before' : ''}${isDropTargetAfter ? ' is-drop-target-after' : ''}`}
+      onDragOver={(event) => {
+        if (!onDrop) {
+          return
+        }
+
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        onDragHover?.(getDropPosition(event))
+      }}
+      onDrop={(event) => {
+        if (!onDrop) {
+          return
+        }
+
+        event.preventDefault()
+        onDrop(getDropPosition(event))
+      }}
+    >
+      <div className={`compact-card__header${node.kind === 'time' ? ' compact-card__header--flush' : ''}`}>
+        <div className="compact-card__header-start">
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            className="compact-card__drag-handle"
+            draggable
+            onDragEnd={onDragEnd}
+            onDragStart={handleDragStart}
+          >
+            {"-"}
+          </Button>
+          {node.kind === 'time' ? (
+            <InputGroup size="sm" className="utility-input">
+              <InputGroup.Text>Time</InputGroup.Text>
+              <Form.Control
+                type="time"
+                value={node.time}
+                onChange={(event) => onChange({ ...node, time: event.target.value })}
+              />
+            </InputGroup>
+          ) : (
+            <div className="compact-card__tag">journeys</div>
+          )}
+        </div>
         <ButtonGroup size="sm">
           <Button variant="outline-secondary" onClick={() => onMove(-1)}>
             Up
@@ -43,24 +111,7 @@ export function ShiftPlanNodeItem({
         </ButtonGroup>
       </div>
 
-      {node.kind === 'time' ? (
-        <Stack gap={2}>
-          <InputGroup size="sm" className="utility-input">
-            <InputGroup.Text>Time</InputGroup.Text>
-            <Form.Control
-              type="time"
-              value={node.time}
-              onChange={(event) => onChange({ ...node, time: event.target.value })}
-            />
-          </InputGroup>
-          {/* <Form.Check
-            checked={Boolean(node.allowBackwardTime)}
-            id={`allow-backward-time-${node.id}`}
-            label="May shorten previous pause in app previews"
-            onChange={(event) => onChange({ ...node, allowBackwardTime: event.target.checked })}
-          /> */}
-        </Stack>
-      ) : (
+      {node.kind === 'time' ? null : (
         <Stack gap={2}>
           <div className="compact-card__footer compact-card__footer--spread">
             <Button
