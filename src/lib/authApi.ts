@@ -1,8 +1,30 @@
+export type OrganizationRole = 'admin' | 'member'
+
+export type OrganizationMembership = {
+  id: string
+  name: string
+  slug: string
+  role: OrganizationRole
+}
+
 export type LoginResult = {
   token: string
+  userId: string
   username: string
-  rank: string
   mustChangePassword: boolean
+  // Site admins can manage users, organizations and memberships through the admin panel.
+  siteAdmin: boolean
+  organizations: OrganizationMembership[]
+}
+
+// Identifies who is calling and which organization's data an org-scoped request targets.
+export type OrganizationRequestContext = {
+  token: string
+  organizationId: string
+}
+
+export function organizationApiUrl({ organizationId }: OrganizationRequestContext, path: string) {
+  return `/api/organizations/${encodeURIComponent(organizationId)}${path}`
 }
 
 // Messages returned by the server's requireAuth middleware, as opposed to unrelated 401s

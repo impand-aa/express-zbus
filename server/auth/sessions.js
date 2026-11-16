@@ -8,7 +8,6 @@ export function createSession(user) {
   sessions.set(token, {
     userId: user._id.toString(),
     username: user.username,
-    rank: user.rank,
     mustChangePassword: user.mustChangePassword !== false,
   })
   return token
@@ -25,4 +24,11 @@ export function markPasswordChanged(token) {
 
 export function destroySession(token) {
   sessions.delete(token)
+}
+
+// Used when an account is deleted or its password is reset, so existing logins stop working at once.
+export function destroySessionsForUser(userId) {
+  for (const [token, session] of sessions) {
+    if (session.userId === userId) sessions.delete(token)
+  }
 }

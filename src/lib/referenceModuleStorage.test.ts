@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   REFERENCE_MODULE_STORAGE_KEY,
+  getReferenceModuleStorageKey,
   loadPersistedReferenceModuleState,
   savePersistedReferenceModuleSources,
   serializePersistedReferenceModuleSources,
@@ -162,5 +163,22 @@ describe('reference module storage', () => {
     }, storage)
 
     expect(storage.getItem(REFERENCE_MODULE_STORAGE_KEY)).toBeNull()
+  })
+
+  it('keeps each organization cache of reference modules separate', () => {
+    const storage = createStorageStub()
+
+    savePersistedReferenceModuleSources({
+      routesSource: ROUTES_SOURCE,
+      panelsSource: '',
+      numsSource: '',
+      soundsSource: '',
+    }, storage, 'org-a')
+
+    expect(storage.getItem(getReferenceModuleStorageKey('org-a'))).not.toBeNull()
+    expect(storage.getItem(REFERENCE_MODULE_STORAGE_KEY)).toBeNull()
+    expect(loadPersistedReferenceModuleState(storage, 'org-a').routesSource).toBe(ROUTES_SOURCE)
+    expect(loadPersistedReferenceModuleState(storage, 'org-b').routesSource).toBe('')
+    expect(loadPersistedReferenceModuleState(storage, 'org-b').restoredFromStorage).toBe(false)
   })
 })

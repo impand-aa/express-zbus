@@ -4,6 +4,11 @@ import { parseTemporaryNumsModuleSource, parseTemporaryPanelsModuleSource } from
 
 export const REFERENCE_MODULE_STORAGE_KEY = 'shiftmaker.referenceModuleSources.v1'
 
+// Each organization has its own reference modules, so the browser cache is kept per organization.
+export function getReferenceModuleStorageKey(organizationId?: string) {
+  return organizationId ? `${REFERENCE_MODULE_STORAGE_KEY}:${organizationId}` : REFERENCE_MODULE_STORAGE_KEY
+}
+
 type ReferenceModuleStorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 export interface PersistedReferenceModuleSources {
@@ -186,9 +191,12 @@ export function buildLoadedReferenceModuleState(sources: PersistedReferenceModul
   }
 }
 
-export function loadPersistedReferenceModuleState(storage?: ReferenceModuleStorageLike | null): LoadedReferenceModuleState {
+export function loadPersistedReferenceModuleState(
+  storage?: ReferenceModuleStorageLike | null,
+  organizationId?: string,
+): LoadedReferenceModuleState {
   const resolvedStorage = getStorage(storage)
-  const rawValue = resolvedStorage?.getItem(REFERENCE_MODULE_STORAGE_KEY) ?? null
+  const rawValue = resolvedStorage?.getItem(getReferenceModuleStorageKey(organizationId)) ?? null
   const { sources, storageWarning } = deserializePersistedReferenceModuleSources(rawValue)
 
   return buildLoadedReferenceModuleState(sources, storageWarning)
@@ -197,16 +205,19 @@ export function loadPersistedReferenceModuleState(storage?: ReferenceModuleStora
 export function savePersistedReferenceModuleSources(
   sources: PersistedReferenceModuleSources,
   storage?: ReferenceModuleStorageLike | null,
+  organizationId?: string,
 ) {
   const resolvedStorage = getStorage(storage)
   if (!resolvedStorage) {
     return
   }
 
+  const storageKey = getReferenceModuleStorageKey(organizationId)
+
   if (!sources.routesSource.trim() && !sources.panelsSource.trim() && !sources.numsSource.trim() && !sources.soundsSource.trim()) {
-    resolvedStorage.removeItem(REFERENCE_MODULE_STORAGE_KEY)
+    resolvedStorage.removeItem(storageKey)
     return
   }
 
-  resolvedStorage.setItem(REFERENCE_MODULE_STORAGE_KEY, serializePersistedReferenceModuleSources(sources))
+  resolvedStorage.setItem(storageKey, serializePersistedReferenceModuleSources(sources))
 }

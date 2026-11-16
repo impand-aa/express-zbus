@@ -1,4 +1,4 @@
-import { parseJsonResponse } from './authApi'
+import { organizationApiUrl, parseJsonResponse, type OrganizationRequestContext } from './authApi'
 
 export type ShiftRecord = {
   moduleName: string
@@ -11,26 +11,26 @@ export function upsertShiftRecord(shifts: ShiftRecord[], shift: ShiftRecord): Sh
   return [...shifts.filter((existing) => existing.moduleName !== shift.moduleName), shift]
 }
 
-export async function fetchAllShifts(token: string): Promise<ShiftRecord[]> {
-  const response = await fetch('/api/shifts', {
-    headers: { Authorization: `Bearer ${token}` },
+export async function fetchAllShifts(context: OrganizationRequestContext): Promise<ShiftRecord[]> {
+  const response = await fetch(organizationApiUrl(context, '/shifts'), {
+    headers: { Authorization: `Bearer ${context.token}` },
   })
   return parseJsonResponse(response)
 }
 
-export async function fetchShift(token: string, moduleName: string): Promise<ShiftRecord> {
-  const response = await fetch(`/api/shifts/${encodeURIComponent(moduleName)}`, {
-    headers: { Authorization: `Bearer ${token}` },
+export async function fetchShift(context: OrganizationRequestContext, moduleName: string): Promise<ShiftRecord> {
+  const response = await fetch(organizationApiUrl(context, `/shifts/${encodeURIComponent(moduleName)}`), {
+    headers: { Authorization: `Bearer ${context.token}` },
   })
   return parseJsonResponse(response)
 }
 
-export async function saveShift(token: string, moduleName: string, source: string): Promise<ShiftRecord> {
-  const response = await fetch(`/api/shifts/${encodeURIComponent(moduleName)}`, {
+export async function saveShift(context: OrganizationRequestContext, moduleName: string, source: string): Promise<ShiftRecord> {
+  const response = await fetch(organizationApiUrl(context, `/shifts/${encodeURIComponent(moduleName)}`), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${context.token}`,
     },
     body: JSON.stringify({ source }),
   })

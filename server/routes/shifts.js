@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { getDb } from '../db.js'
-import { requireAuth } from '../middleware/requireAuth.js'
 
+// Mounted under /organizations/:organizationId; every query is filtered by req.organization.id.
 const router = Router()
 
 function toShiftRecord(doc) {
@@ -13,17 +13,20 @@ function toShiftRecord(doc) {
   }
 }
 
-// Bulk read, used to keep the Overview tab in sync with every shift on the server.
-router.get('/', requireAuth, async (req, res, next) => {
+// Bulk read, used to keep the Overview tab in sync with every shift in the organization.
+router.get('/', async (req, res, next) => {
   try {
-    const docs = await getDb().collection('shifts').find().toArray()
+    const docs = await getDb().collection('shifts').find({ organizationId: req.organization.id }).toArray()
     res.json(docs.map(toShiftRecord))
   } catch (err) { next(err) }
 })
 
-router.get('/:moduleName', requireAuth, async (req, res, next) => {
+router.get('/:moduleName', async (req, res, next) => {
   try {
-    const doc = await getDb().collection('shifts').findOne({ moduleName: req.params.moduleName })
+    const doc = await getDb().collection('shifts').findOne({
+      organizationId: req.organization.id,
+      moduleName: req.params.moduleName,
+    })
     if (!doc) {
       return res.status(404).json({ error: 'shift not found' })
     }
@@ -31,7 +34,7 @@ router.get('/:moduleName', requireAuth, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.put('/:moduleName', requireAuth, async (req, res, next) => {
+router.put('/:moduleName', async (req, res, next) => {
   try {
     const moduleName = req.params.moduleName.trim()
     const { source } = req.body ?? {}
@@ -42,8 +45,8 @@ router.put('/:moduleName', requireAuth, async (req, res, next) => {
     const updatedAt = new Date()
     const updatedBy = req.session.username
     await getDb().collection('shifts').updateOne(
-      { moduleName },
-      { $set: { moduleName, source, updatedBy, updatedAt } },
+      { organizationId: req.organization.id, moduleName },
+      { $set: { source, updatedBy, updatedAt } },
       { upsert: true },
     )
     res.json({ moduleName, source, updatedBy, updatedAt })

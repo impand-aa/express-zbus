@@ -2,8 +2,9 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { ObjectId } from 'mongodb'
 import { getDb } from '../db.js'
-import { createSession, destroySession, markPasswordChanged } from '../auth/sessions.js'
+import { createSession, destroySession, destroySessionsForUser, markPasswordChanged } from '../auth/sessions.js'
 import { requireAuth } from '../middleware/requireAuth.js'
+import { listUserOrganizations } from '../organizations.js'
 
 const router = Router()
 const SALT_ROUNDS = 10
@@ -31,9 +32,11 @@ router.post('/login', async (req, res, next) => {
     const token = createSession(user)
     res.json({
       token,
+      userId: user._id.toString(),
       username: user.username,
-      rank: user.rank,
       mustChangePassword: user.mustChangePassword !== false,
+      siteAdmin: user.siteAdmin === true,
+      organizations: await listUserOrganizations(user._id.toString()),
     })
   } catch (err) {
     next(err)
@@ -75,13 +78,27 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
   }
 })
 
-// Lets the client verify/restore a saved token without re-entering credentials.
-router.get('/session', requireAuth, (req, res) => {
-  res.json({
-    username: req.session.username,
-    rank: req.session.rank,
-    mustChangePassword: req.session.mustChangePassword,
-  })
+// Lets the client verify/restore a saved token without re-entering credentials. Organizations are
+// re-read each time so membership and site admin changes show up without signing in again.
+router.get('/session', requireAuth, async (req, res, next) => {
+  try {
+    const user = await getDb().collection('users').findOne(
+      { _id: new ObjectId(req.session.userId) },
+      { projection: { siteAdmin: 1 } },
+    )
+    if (!user) {
+      destroySessionsForUser(req.session.userId)
+      return res.status(401).json({ error: 'invalid or expired session' })
+    }
+
+    res.json({
+      userId: req.session.userId,
+      username: req.session.username,
+      mustChangePassword: req.session.mustChangePassword,
+      siteAdmin: user.siteAdmin === true,
+      organizations: await listUserOrganizations(req.session.userId),
+    })
+  } catch (err) { next(err) }
 })
 
 router.post('/logout', requireAuth, (req, res) => {

@@ -146,8 +146,8 @@ function getInitialNotice(
 }
 
 function App() {
-  const { token, rank, username } = useAuth()
-  const [initialReferenceModulesState] = useState(loadPersistedReferenceModuleState)
+  const { token, role, username, activeOrganization, organizationRequestContext } = useAuth()
+  const [initialReferenceModulesState] = useState(() => loadPersistedReferenceModuleState(undefined, activeOrganization.id))
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('build')
   const [document, setDocument] = useState<ShiftDocument>(() => createEmptyDocument())
   const [selectedJourneyId, setSelectedJourneyId] = useState<string | null>(null)
@@ -302,8 +302,8 @@ function App() {
       panelsSource,
       numsSource,
       soundsSource,
-    })
-  }, [numsSource, panelsSource, routesSource, soundsSource])
+    }, undefined, activeOrganization.id)
+  }, [activeOrganization.id, numsSource, panelsSource, routesSource, soundsSource])
 
   function setDefaultDownloadName(moduleName: string) {
     setDownloadName((currentDownloadName) => (
@@ -348,7 +348,7 @@ function App() {
 
     setSavingShiftModuleName(normalizedModuleName)
     try {
-      const record = await saveShift(token, normalizedModuleName, source)
+      const record = await saveShift(organizationRequestContext, normalizedModuleName, source)
       setSavedShifts((currentSavedShifts) => upsertShiftRecord(currentSavedShifts, record))
       setShiftModuleName(normalizedModuleName)
       setDefaultDownloadName(normalizedModuleName)
@@ -387,7 +387,7 @@ function App() {
 
   async function syncShiftsFromServer() {
     try {
-      const shifts = await fetchAllShifts(token)
+      const shifts = await fetchAllShifts(organizationRequestContext)
       setSavedShifts(shifts)
     } catch (error) {
       setNotice({
@@ -399,7 +399,7 @@ function App() {
 
   async function syncPublishRequestsFromServer() {
     try {
-      const requests = await fetchPublishRequests(token)
+      const requests = await fetchPublishRequests(organizationRequestContext)
       setPublishRequests(requests)
     } catch (error) {
       setNotice({
@@ -420,7 +420,7 @@ function App() {
 
     setCreatingPublishRequest(true)
     try {
-      const created = await createPublishRequest(token, request)
+      const created = await createPublishRequest(organizationRequestContext, request)
       setPublishRequests((currentRequests) => [created, ...currentRequests])
       setNotice({
         text: `Requested a publish for ${request.type}${request.objectId ? ` ${request.objectId}` : ''}.`,
@@ -439,7 +439,7 @@ function App() {
   async function updatePublishRequestStatus(id: string, status: PublishRequestStatus) {
     setUpdatingPublishRequestId(id)
     try {
-      const updated = await setPublishRequestStatus(token, id, status)
+      const updated = await setPublishRequestStatus(organizationRequestContext, id, status)
       setPublishRequests((currentRequests) => currentRequests.map((request) => (
         request.id === id ? updated : request
       )))
@@ -464,7 +464,7 @@ function App() {
 
     setUpdatingPublishRequestId(id)
     try {
-      await deletePublishRequest(token, id)
+      await deletePublishRequest(organizationRequestContext, id)
       setPublishRequests((currentRequests) => currentRequests.filter((request) => request.id !== id))
     } catch (error) {
       setNotice({
@@ -1052,7 +1052,7 @@ function App() {
 
   async function syncReferenceModulesFromServer() {
     try {
-      const sources = await fetchReferenceModules(token)
+      const sources = await fetchReferenceModules(organizationRequestContext)
       applyFetchedReferenceModuleSources(sources)
       setReferenceModuleSyncError('')
       setNotice({
@@ -1067,7 +1067,7 @@ function App() {
   async function saveReferenceModuleToServer(type: 'routes' | 'panels' | 'nums' | 'sounds', source: string) {
     setSavingModuleType(type)
     try {
-      await saveReferenceModule(token, type, source)
+      await saveReferenceModule(organizationRequestContext, type, source)
       setNotice({
         text: `Saved ${type} module to server.`,
         variant: 'success',
@@ -1240,7 +1240,12 @@ function App() {
             </Button>
           </ButtonGroup>
 
-          <UserMenu>
+          <UserMenu
+            confirmOrganizationSwitch={(organization) => requestConfirmation(
+              `Switch to ${organization.name}? Any unsaved work in the editor will be discarded.`,
+              { title: 'Switch organization?', confirmLabel: 'Switch' },
+            )}
+          >
             <Dropdown.Item onClick={() => setShowIntegrityConfigModal(true)}>
               Integrity{integrityWarnings.length > 0 ? ` (${integrityWarnings.length})` : ''}
             </Dropdown.Item>
@@ -1406,7 +1411,7 @@ function App() {
             onImportPanels={importPanelsSource}
             onImportRoutes={importRoutesSource}
             onImportSounds={importSoundsSource}
-            canSaveToServer={rank === 'admin'}
+            canSaveToServer={role === 'admin'}
             savingModuleType={savingModuleType}
             onSaveNumsToServer={() => saveReferenceModuleToServer('nums', numsSource)}
             onSavePanelsToServer={() => saveReferenceModuleToServer('panels', panelsSource)}
@@ -1447,7 +1452,7 @@ function App() {
           <PublishesTab
             creatingRequest={creatingPublishRequest}
             currentUsername={username}
-            isAdmin={rank === 'admin'}
+            isAdmin={role === 'admin'}
             requests={publishRequests}
             updatingRequestId={updatingPublishRequestId}
             onCreateRequest={createPublishRequestOnServer}

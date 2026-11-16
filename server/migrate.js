@@ -4,9 +4,10 @@ import * as createUsers from './migrations/001-create-users.js'
 import * as createReferenceModules from './migrations/002-create-reference-modules.js'
 import * as createShifts from './migrations/003-create-shifts.js'
 import * as createPublishRequests from './migrations/004-create-publish-requests.js'
+import * as addOrganizations from './migrations/005-add-organizations.js'
 
 // Add new migrations here, in the order they should run.
-const migrations = [createUsers, createReferenceModules, createShifts, createPublishRequests]
+const migrations = [createUsers, createReferenceModules, createShifts, createPublishRequests, addOrganizations]
 
 async function run() {
   const db = await connectToDatabase()

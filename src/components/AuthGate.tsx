@@ -1,22 +1,62 @@
-import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { createContext, Fragment, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Alert, Button, Card, Container, Form } from 'react-bootstrap'
 
-import { changePassword, fetchSession, login, logout as logoutRequest, onSessionExpired } from '../lib/authApi'
+import { AdminPanelModal } from './AdminPanelModal'
+
+import {
+  changePassword,
+  fetchSession,
+  login,
+  logout as logoutRequest,
+  onSessionExpired,
+  type OrganizationMembership,
+  type OrganizationRequestContext,
+  type OrganizationRole,
+} from '../lib/authApi'
 
 type Session = {
   token: string
+  userId: string
   username: string
-  rank: string
   mustChangePassword: boolean
+  siteAdmin: boolean
+  organizations: OrganizationMembership[]
 }
 
 const TOKEN_STORAGE_KEY = 'shiftmaker.sessionToken'
+const ACTIVE_ORGANIZATION_STORAGE_KEY = 'shiftmaker.activeOrganizationId'
 
 type AuthContextValue = {
   token: string
+  userId: string
   username: string
-  rank: string
+  siteAdmin: boolean
+  organizations: OrganizationMembership[]
+  activeOrganization: OrganizationMembership
+  // The user's role within the active organization.
+  role: OrganizationRole
+  // Passed to every org-scoped API call so requests always target the active organization.
+  organizationRequestContext: OrganizationRequestContext
+  switchOrganization: (organizationId: string) => void
+  // Re-reads organizations and site admin status, e.g. after the admin panel changes memberships.
+  refreshSession: () => Promise<void>
   logout: () => void
+}
+
+function readStoredActiveOrganizationId() {
+  try {
+    return localStorage.getItem(ACTIVE_ORGANIZATION_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function storeActiveOrganizationId(organizationId: string) {
+  try {
+    localStorage.setItem(ACTIVE_ORGANIZATION_STORAGE_KEY, organizationId)
+  } catch {
+    // Remembering the last organization is a convenience; ignore storage failures.
+  }
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -41,6 +81,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSessionExpired, setIsSessionExpired] = useState(false)
+  const [preferredOrganizationId, setPreferredOrganizationId] = useState(readStoredActiveOrganizationId)
+  const [showAdminPanel, setShowAdminPanel] = useState(false)
 
   // Restore the session from a saved token so a page refresh doesn't require signing in again.
   useEffect(() => {
@@ -69,7 +111,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         return
       }
       isChecking = true
-      fetchSession(session.token)
+      refreshSessionDetails(session)
         .then(() => setIsSessionExpired(false))
         .catch(() => setIsSessionExpired(true))
         .finally(() => {
@@ -89,6 +131,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     return onSessionExpired(() => setIsSessionExpired(true))
   }, [session])
+
+  // Picks up organization membership/role and site admin changes made since sign-in.
+  async function refreshSessionDetails(currentSession: Session) {
+    const result = await fetchSession(currentSession.token)
+    if (
+      result.siteAdmin !== currentSession.siteAdmin
+      || JSON.stringify(result.organizations) !== JSON.stringify(currentSession.organizations)
+    ) {
+      setSession((current) => (
+        current?.token === currentSession.token
+          ? { ...current, siteAdmin: result.siteAdmin, organizations: result.organizations }
+          : current
+      ))
+    }
+  }
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault()
@@ -139,6 +196,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     localStorage.removeItem(TOKEN_STORAGE_KEY)
     setSession(null)
+  }
+
+  function handleSwitchOrganization(organizationId: string) {
+    storeActiveOrganizationId(organizationId)
+    setPreferredOrganizationId(organizationId)
   }
 
   if (isRestoringSession) {
@@ -233,15 +295,68 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
 
+  const activeOrganization = session.organizations.find((organization) => organization.id === preferredOrganizationId)
+    ?? session.organizations[0]
+
+  if (!activeOrganization) {
+    return (
+      <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
+        <Card style={{ maxWidth: 380, width: '100%' }}>
+          <Card.Body>
+            <Card.Title className="mb-3">No organization access</Card.Title>
+            <p className="text-muted">
+              Signed in as <strong>{session.username}</strong>, but this account is not a member of any organization yet.
+              {session.siteAdmin ? ' Use the admin panel to create an organization and add yourself to it.' : ' Ask an administrator to add you to one.'}
+            </p>
+            {session.siteAdmin && (
+              <Button className="w-100 mb-2" onClick={() => setShowAdminPanel(true)}>
+                Open admin panel
+              </Button>
+            )}
+            <Button variant="outline-secondary" className="w-100" onClick={handleLogout}>
+              Log out
+            </Button>
+          </Card.Body>
+        </Card>
+        {session.siteAdmin && (
+          <AdminPanelModal
+            show={showAdminPanel}
+            token={session.token}
+            currentUserId={session.userId}
+            onClose={() => {
+              setShowAdminPanel(false)
+              refreshSessionDetails(session).catch(() => setIsSessionExpired(true))
+            }}
+          />
+        )}
+      </Container>
+    )
+  }
+
+  const contextValue: AuthContextValue = {
+    token: session.token,
+    userId: session.userId,
+    username: session.username,
+    siteAdmin: session.siteAdmin,
+    organizations: session.organizations,
+    activeOrganization,
+    role: activeOrganization.role,
+    organizationRequestContext: { token: session.token, organizationId: activeOrganization.id },
+    switchOrganization: handleSwitchOrganization,
+    refreshSession: () => refreshSessionDetails(session),
+    logout: handleLogout,
+  }
+
   return (
-    <AuthContext.Provider value={{ token: session.token, username: session.username, rank: session.rank, logout: handleLogout }}>
+    <AuthContext.Provider value={contextValue}>
       {isSessionExpired ? (
         <Alert variant="danger" className="mb-0 session-expired-banner">
           Your session has expired (likely due to server inactivity). Your changes may no longer save —
           copy any in-progress work, then sign in again when ready.
         </Alert>
       ) : null}
-      {children}
+      {/* Keyed by organization so switching remounts the workspace and no state leaks between organizations. */}
+      <Fragment key={activeOrganization.id}>{children}</Fragment>
     </AuthContext.Provider>
   )
 }

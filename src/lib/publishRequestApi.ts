@@ -1,4 +1,4 @@
-import { parseJsonResponse } from './authApi'
+import { organizationApiUrl, parseJsonResponse, type OrganizationRequestContext } from './authApi'
 
 export type PublishRequestType = 'shift' | 'route' | 'panel'
 export type PublishRequestStatus = 'pending' | 'complete'
@@ -14,22 +14,22 @@ export type PublishRequestRecord = {
   status: PublishRequestStatus
 }
 
-export async function fetchPublishRequests(token: string): Promise<PublishRequestRecord[]> {
-  const response = await fetch('/api/publish-requests', {
-    headers: { Authorization: `Bearer ${token}` },
+export async function fetchPublishRequests(context: OrganizationRequestContext): Promise<PublishRequestRecord[]> {
+  const response = await fetch(organizationApiUrl(context, '/publish-requests'), {
+    headers: { Authorization: `Bearer ${context.token}` },
   })
   return parseJsonResponse(response)
 }
 
 export async function createPublishRequest(
-  token: string,
+  context: OrganizationRequestContext,
   request: { type: PublishRequestType; objectId: string | null; description: string; data: string },
 ): Promise<PublishRequestRecord> {
-  const response = await fetch('/api/publish-requests', {
+  const response = await fetch(organizationApiUrl(context, '/publish-requests'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${context.token}`,
     },
     body: JSON.stringify(request),
   })
@@ -37,25 +37,25 @@ export async function createPublishRequest(
 }
 
 export async function setPublishRequestStatus(
-  token: string,
+  context: OrganizationRequestContext,
   id: string,
   status: PublishRequestStatus,
 ): Promise<PublishRequestRecord> {
-  const response = await fetch(`/api/publish-requests/${encodeURIComponent(id)}`, {
+  const response = await fetch(organizationApiUrl(context, `/publish-requests/${encodeURIComponent(id)}`), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${context.token}`,
     },
     body: JSON.stringify({ status }),
   })
   return parseJsonResponse(response)
 }
 
-export async function deletePublishRequest(token: string, id: string): Promise<void> {
-  const response = await fetch(`/api/publish-requests/${encodeURIComponent(id)}`, {
+export async function deletePublishRequest(context: OrganizationRequestContext, id: string): Promise<void> {
+  const response = await fetch(organizationApiUrl(context, `/publish-requests/${encodeURIComponent(id)}`), {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${context.token}` },
   })
   await parseJsonResponse(response)
 }
